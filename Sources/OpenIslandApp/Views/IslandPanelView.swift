@@ -960,7 +960,7 @@ private struct IslandSessionRow: View {
     var onDismiss: (() -> Void)?
 
     @State private var isHighlighted = false
-    @State private var isManuallyExpanded = false
+    @State private var detailOverride: Bool?
     @State private var replyText: String = ""
 
     var body: some View {
@@ -969,8 +969,12 @@ private struct IslandSessionRow: View {
 
     private func rowBody(referenceDate: Date) -> some View {
         let rawPresence = session.islandPresence(at: referenceDate)
-        let presence = (rawPresence == .inactive && isManuallyExpanded) ? .active : rawPresence
-        let showsExpandedContent = presence != .inactive
+        let isStaleCompleted = session.isStaleCompletedForIsland(at: referenceDate)
+        let defaultShowsDetail = !isStaleCompleted && (rawPresence != .inactive || isActionable)
+        let showsDetail = detailOverride ?? defaultShowsDetail
+        let presence = isStaleCompleted
+            ? .inactive
+            : ((showsDetail && rawPresence == .inactive) ? .active : rawPresence)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 statusDot(for: presence)
@@ -993,13 +997,14 @@ private struct IslandSessionRow: View {
                                 compactBadge(terminalBadge, presence: presence)
                             }
                             compactBadge(session.spotlightAgeBadge, presence: presence)
+                            detailToggleButton(isOpen: showsDetail)
                             if let onDismiss {
                                 DismissButton(action: onDismiss)
                             }
                         }
                     }
 
-                    if showsExpandedContent || isActionable,
+                    if showsDetail,
                        let promptLine = session.spotlightPromptLineText ?? expandedPromptLineText {
                         Text(promptLine)
                             .font(.system(size: 11.5, weight: .medium))
@@ -1007,7 +1012,7 @@ private struct IslandSessionRow: View {
                             .lineLimit(1)
                     }
 
-                    if showsExpandedContent || isActionable,
+                    if showsDetail,
                        let activityLine = session.spotlightActivityLineText ?? expandedActivityLineText {
                         Text(activityLine)
                             .font(.system(size: 11, weight: .medium))
@@ -1015,7 +1020,7 @@ private struct IslandSessionRow: View {
                             .lineLimit(1)
                     }
 
-                    if showsExpandedContent,
+                    if showsDetail,
                        let subagents = session.claudeMetadata?.activeSubagents,
                        !subagents.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -1061,7 +1066,7 @@ private struct IslandSessionRow: View {
                         }
                     }
 
-                    if showsExpandedContent,
+                    if showsDetail,
                        let tasks = session.claudeMetadata?.activeTasks,
                        !tasks.isEmpty {
                         VStack(alignment: .leading, spacing: 3) {
@@ -1087,7 +1092,7 @@ private struct IslandSessionRow: View {
             .padding(.horizontal, isActionable ? 16 : 16)
             .padding(.vertical, isActionable ? 14 : 14)
 
-            if isActionable {
+            if isActionable && showsDetail {
                 actionableBody
                     .padding(.horizontal, 16)
                     .padding(.bottom, 14)
@@ -1102,6 +1107,7 @@ private struct IslandSessionRow: View {
                 .strokeBorder(actionableBorderColor)
         )
         .compositingGroup()
+        .opacity(isStaleCompleted ? 0.7 : 1)
         .shadow(color: .black.opacity(0.24), radius: isHighlighted ? 8 : 0, y: isHighlighted ? 6 : 0)
         .overlay(
             Group {
@@ -1123,7 +1129,7 @@ private struct IslandSessionRow: View {
         }
         .onChange(of: isInteractive) { _, interactive in
             if !interactive {
-                isManuallyExpanded = false
+                detailOverride = nil
             }
         }
     }
@@ -1392,13 +1398,13 @@ private struct IslandSessionRow: View {
 
     /// Prompt line for manually expanded inactive rows (bypasses time-based filter).
     private var expandedPromptLineText: String? {
-        guard isManuallyExpanded, let prompt = session.spotlightPromptText else { return nil }
+        guard detailOverride == true, let prompt = session.spotlightPromptText else { return nil }
         return "You: \(prompt)"
     }
 
     /// Activity line for manually expanded inactive rows (bypasses time-based filter).
     private var expandedActivityLineText: String? {
-        guard isManuallyExpanded else { return nil }
+        guard detailOverride == true else { return nil }
         let trimmed = session.lastAssistantMessageText?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let assistantMessage = trimmed, !assistantMessage.isEmpty {
@@ -1408,14 +1414,26 @@ private struct IslandSessionRow: View {
     }
 
     private func handlePrimaryTap() {
-        let rawPresence = session.islandPresence(at: referenceDate)
-        if rawPresence == .inactive && !isManuallyExpanded {
+        guard isInteractive else { return }
+        onJump()
+    }
+
+    private func detailToggleButton(isOpen: Bool) -> some View {
+        Button {
+            guard isInteractive else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
-                isManuallyExpanded = true
+                detailOverride = !isOpen
             }
-        } else {
-            onJump()
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(isOpen ? .white.opacity(0.62) : .white.opacity(0.36))
+                .frame(width: 18, height: 18)
+                .rotationEffect(.degrees(isOpen ? 180 : 0))
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isOpen ? "Collapse session detail" : "Expand session detail")
     }
 
     private func compactBadge(

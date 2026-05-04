@@ -1488,6 +1488,10 @@ final class AppModel {
             score += 600
         }
 
+        if session.isStaleCompletedForIsland(at: now) {
+            score -= 900
+        }
+
         let age = now.timeIntervalSince(session.islandActivityDate)
         switch age {
         case ..<120:
